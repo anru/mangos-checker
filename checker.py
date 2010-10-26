@@ -74,7 +74,7 @@ def _popen(cmd, input=None, **kwargs):
     return p.communicate(input)
 
 def mail_message(rcpt, message, title='Mangop notification'):
-    cmd = 'mutt -s %s %s' % (title, rcpt)
+    cmd = "mutt -s '%s' %s" % (title, rcpt)
     _popen(cmd, message)
 
 def mail_admins(message, title='Mangop notification'):
@@ -115,7 +115,7 @@ class Cache(object):
             
     def save(self):
         f = open(self.cache_file, 'wt')
-        pickle.dumps(self.data, f)
+        pickle.dump(self.data, f)
         f.close()
     
     def set(self, name, value):
