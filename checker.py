@@ -5,7 +5,7 @@ from os.path import join as J
 import os.path as op
 import socket
 import sys
-from time import time
+from time import time, sleep
 import datetime
 
 import logging
@@ -13,15 +13,23 @@ import traceback
 import logging.handlers
 import cPickle as pickle
 from subprocess import PIPE, Popen
+from multiprocessing import Process
 
 ################## SOME CONFIGURATION CONSTANTS ###################
 
 ADMINS = (
     ('Andrey Rublev', 'version.ru@gmail.com'),
     ('Sergey Rublev', 'narma.nsk@gmail.com'),
-    ('SeT', 'can15@narod.ru')
+   # ('SeT', 'can15@narod.ru')
 )
 
+TIME_TO_WAKEUP = 90
+CHECK_LIMIT = 25
+
+MANGOS_DIR = '/home/mangos/bin/used_rev/bin/'
+MANGOS_LOG_DIR = '/var/log/mangos/'
+
+###################################################################
 
 WORK_DIR = J(os.environ['HOME'], '.mangop')
 if not os.path.exists(WORK_DIR):
@@ -50,16 +58,10 @@ logger = setup_logger()
 
 
 if not os.path.isfile('autorestart'):
-	sys.exit(0)
+    sys.exit(0)
 
 os.system("echo `date` > %s/last_start" % WORK_DIR )
 os.system("echo `whoami` > %s/last_user" % WORK_DIR)
-
-
-TIME_TO_WAKEUP = 90
-
-MANGOS_DIR = '/home/mangos/bin/used_rev/bin/'
-MANGOS_LOG_DIR = '/var/log/mangos/'
 
 def _popen(cmd, input=None, **kwargs):
     kw = dict(stdout=PIPE, stderr=PIPE, close_fds=os.name != 'nt', universal_newlines=True)
@@ -77,26 +79,26 @@ def mail_admins(message, title='Mangop notification'):
     for _, email in ADMINS:
         mail_message(email, message)
 
-def check_service(host='127.0.0.1', port=8085):
-	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	s.settimeout(0.7)
-	status = False
+def _check_server(host='127.0.0.1', port=8085):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(0.7)
+    status = False
 
-	try:
-		s.connect((host, port))
-	except socket.error:
-		status = False
-	else:
-		status = True
-	finally:
-		s.close()
-	return status
+    try:
+        s.connect((host, port))
+    except socket.error:
+        status = False
+    else:
+        status = True
+    finally:
+        s.close()
+    return status
     
 def check_server(name):
     if name == SERVER_WORLDD:
-        return check_service(port=8085)
+        return _check_server(port=8085)
     elif name == SERVER_REALMD:
-        return check_service(port=3724)
+        return _check_server(port=3724)
     raise NotImplementedError
     
 class Cache(object):
@@ -123,73 +125,102 @@ class Cache(object):
     def __contains__(self, name):
         return name in self.data
 
-cache = Cache()
-
-
 def kill_server(name):
-	filename = op.join(MANGOS_DIR, '%s.pid' % name) 
-	delete_file = False
-	if os.path.exists(filename):
-		with open(filename) as fp:
-			pid = int(fp.readline())
-			try:
-				os.kill(pid, 9)
-			except OSError, e:
-				if e.errno == 3:
-					delete_file = True
+    filename = op.join(MANGOS_DIR, '%s.pid' % name) 
+    delete_file = False
+    if os.path.exists(filename):
+        with open(filename) as fp:
+            pid = int(fp.readline())
+            try:
+                os.kill(pid, 9)
+            except OSError, e:
+                if e.errno == 3:
+                    delete_file = True
 
-		if delete_file and os.path.exists(filename):
-			os.unlink(filename)
+        if delete_file and os.path.exists(filename):
+            os.unlink(filename)
 
 def start_server(name):
-	try:
-		if name == 'realmd':
-			process_name = J(MANGOS_DIR, 'mangos-realmd')
-		elif name == 'worldd':
-			process_name = J(MANGOS_DIR, 'mangos-worldd')
-		count = int(os.popen("ps ax|grep %s | grep -v grep | wc -l" % process_name).read().strip())
-		if count >= 1:
-			logger.warn('Requested for start, but look for server already started. %s' % count)
-			return
-	except Exception, e:
-		logger.error('%s' % e)
-		
+    try:
+        if name == SERVER_REALMD:
+            process_name = J(MANGOS_DIR, 'mangos-realmd')
+        elif name == SERVER_WORLDD:
+            process_name = J(MANGOS_DIR, 'mangos-worldd')
+        count = int(os.popen("ps ax|grep %s | grep -v grep | wc -l" % process_name).read().strip())
+        if count >= 1:
+            logger.warn('Requested for start, but look for server already started. %s' % count)
+            return
+    except Exception, e:
+        logger.error('%s' % e)
+        mail_admins(traceback.format_exc())
+        
 
-	add_to_log = datetime.datetime.now().strftime('%d_%m_%Y__%H_%M')
-	os.system("%s > %s 2>&1 &" % (
-		op.join(MANGOS_DIR, 'mangos-%s' % name),
-		op.join(MANGOS_LOG_DIR, '%s_%s' % (name, add_to_log))
-		)
-	)
+    add_to_log = datetime.datetime.now().strftime('%d_%m_%Y__%H_%M')
+    cmd = "%s > %s 2>&1 &" % (
+        op.join(MANGOS_DIR, 'mangos-%s' % name),
+        op.join(MANGOS_LOG_DIR, '%s_%s' % (name, add_to_log))
+        )
+    logger.debug('Starting %s cmd: %s' % (name, cmd))
+    os.system(cmd)
+    
+check_cc = 0
+check_finished = False
 
-sleep = 7
+def verbosethrows(func):
+    from functools import wraps
+    @wraps(func)
+    def _wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except KeyboardInterrupt:
+            raise
+        except SystemExit:
+            raise
+        except:
+            logger.error(traceback.format_exc())
+            mail_admins(traceback.format_exc())
+    return _wrapper
 
-def check(count=10):
-	for i in range(count):
-		server_status = check_server()
-		if not server_status and (time() - cacheget('checker_lastkill', 0)) > TIME_TO_WAKEUP:
-			down_check = cacheget('checker_down_check', 0) + 1
-			if down_check > 10:
-				kill_server('realmd')
-				kill_server('worldd')
-				start_server('realmd')
-				start_server('worldd')
-				client.set('checker_lastkill', time())
-				logger.info('Server restarted!')
-				sys.exit(0)
-			else:
-				logger.warning('Server looks down, but downChecks=%d' % down_check)
-				sleep = 1
-				check(i-1)
-				client.set('checker_down_check', down_check)
-		else:
-			if server_status:
-				logger.info('Server is OK')
-				client.set('checker_down_check', 0)
-			else:
-				logger.info('We need to wait N seconds to start restarting count') #% TIME_TO_WAKEUP - (time() - float(cacheget('checker_lastkill', time()))) )
-			sleep = 6
-		os.system('sleep %s' % sleep)
+        
+@verbosethrows
+def do_check_service(server_name):
+    cache = Cache()
+    server_status = check_server(server_name)
+    if not server_status:
+        if (time() - cache.get('%s_lastkill' % server_name, 0)) > TIME_TO_WAKEUP:
+            down_check = cache.get('%s_down_check' % server_name, 0) + 1
+            if down_check > 10:
+                kill_server(server_name)
+                start_server(server_name)
+                cache.set('%s_lastkill' % server_name, time())
+                logger.critical('Server %s restarted!' % server_name)
+                mail_admins("Server %s restarted!" % server_name)
+                sys.exit(0)
+            else:
+                logger.warning('Server %s looks down, but downChecks=%d' % (server_name, down_check))
+                client.set('%s_down_check' % server_name, down_check)
+                sleep(1)
+                do_check_service(server_name)
+        else:
+            logger.info('[%s] We need to wait %s seconds to start restarting count' % (server_name, TIME_TO_WAKEUP))
+    else:
+        logger.info('Server %s is OK' % server_name)
+        client.set('%s_down_check' % server_name, 0)
+
+
+@verbosethrows
+def check():
+    check_cc += 1
+    if check_cc > CHECK_LIMIT:
+        logger.error("Check limit reached")
+        sys.exit(1)
+    
+    p1 = Process(target=do_check_service, name="%s checker" % SERVER_WORLDD, args=(SERVER_WORLDD,))
+    p2 = Process(target=do_check_service, name="%s checker" % SERVER_REALMD, args=(SERVER_REALMD,))
+    p1.start()
+    p2.start()
+        
 
 if __name__ == "__main__":
-	check()
+    check()
+
