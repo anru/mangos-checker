@@ -60,7 +60,7 @@ def setup_logger():
 logger = setup_logger()
 
 
-if not os.path.isfile('autorestart'):
+if not os.path.isfile(J(WORK_DIR, 'autorestart')):
     sys.exit(0)
 
 os.system("echo `date` > %s/last_start" % WORK_DIR )
