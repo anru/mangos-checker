@@ -69,8 +69,9 @@ def _popen(cmd, input=None, **kwargs):
     kw = dict(stdout=PIPE, stderr=PIPE, close_fds=os.name != 'nt', universal_newlines=True)
     if input is not None:
         kw['stdin'] = PIPE
+    kw['shell'] = kwargs.pop('shell', True)
     kw.update(kwargs)
-    p = Popen(cmd, shell=True, **kw)
+    p = Popen(cmd, **kw)
     return p.communicate(input)
 
 def mail_message(rcpt, message, title='Mangop notification'):
@@ -168,7 +169,9 @@ def start_server(name):
         op.join(MANGOS_LOG_DIR, '%s_%s' % (name, add_to_log))
         )
     logger.debug('Starting %s cmd: %s' % (name, cmd))
-    os.system(cmd)
+    os.chdir(MANGOS_DIR)
+    p = Popen(cmd, shell=True, cwd=MANGOS_DIR)
+    logger.info('started %s with pid %d' % (name, p.pid))
     
 def verbosethrows(func):
     from functools import wraps
