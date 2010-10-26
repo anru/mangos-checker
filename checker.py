@@ -15,6 +15,8 @@ import cPickle as pickle
 from subprocess import PIPE, Popen
 from multiprocessing import Process
 
+WORK_DIR = J(os.environ['HOME'], '.mangop')
+
 ################## SOME CONFIGURATION CONSTANTS ###################
 
 ADMINS = (
@@ -29,9 +31,10 @@ CHECK_LIMIT = 25
 MANGOS_DIR = '/home/mangos/bin/used_rev/bin/'
 MANGOS_LOG_DIR = '/var/log/mangos/'
 
+RUN_SOCKET_PATH = J(WORK_DIR, 'run.sock')
+
 ###################################################################
 
-WORK_DIR = J(os.environ['HOME'], '.mangop')
 if not os.path.exists(WORK_DIR):
     os.mkdir(WORK_DIR)
     
@@ -163,9 +166,6 @@ def start_server(name):
     logger.debug('Starting %s cmd: %s' % (name, cmd))
     os.system(cmd)
     
-check_cc = 0
-check_finished = False
-
 def verbosethrows(func):
     from functools import wraps
     @wraps(func)
@@ -198,27 +198,55 @@ def do_check_service(server_name):
                 sys.exit(0)
             else:
                 logger.warning('Server %s looks down, but downChecks=%d' % (server_name, down_check))
-                client.set('%s_down_check' % server_name, down_check)
+                cache.set('%s_down_check' % server_name, down_check)
                 sleep(1)
                 do_check_service(server_name)
         else:
             logger.info('[%s] We need to wait %s seconds to start restarting count' % (server_name, TIME_TO_WAKEUP))
     else:
         logger.info('Server %s is OK' % server_name)
-        client.set('%s_down_check' % server_name, 0)
+        cache.set('%s_down_check' % server_name, 0)
 
+@verbosethrows  
+def socket_runner():
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        os.remove(RUN_SOCKET_PATH)
+    except OSError:
+        pass
+    s.bind(RUN_SOCKET_PATH)
+    s.listen(1)
+    conn, addr = s.accept()
+    while 1:
+        data = conn.recv(10)
+        if data == 'alive?':
+            conn.send('yes')
+    conn.close()
+
+def already_running():
+    if not os.path.exists(RUN_SOCKET_PATH):
+        return False
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(RUN_SOCKET_PATH)
+    s.send('alive?')
+    data = s.recv(10)
+    logger.debug('socket runner answered: %s' % data)
+    s.close()
+    return data == 'yes'
 
 @verbosethrows
 def check():
-    check_cc += 1
-    if check_cc > CHECK_LIMIT:
-        logger.error("Check limit reached")
-        sys.exit(1)
-    
+    if already_running():
+        sys.exit(0)
+    psocket = Process(target=socket_runner, name='socket_runner')
+    psocket.start()
     p1 = Process(target=do_check_service, name="%s checker" % SERVER_WORLDD, args=(SERVER_WORLDD,))
     p2 = Process(target=do_check_service, name="%s checker" % SERVER_REALMD, args=(SERVER_REALMD,))
     p1.start()
     p2.start()
+    p1.join()
+    p2.join()
+    psocket.terminate()
         
 
 if __name__ == "__main__":
