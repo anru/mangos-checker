@@ -108,7 +108,11 @@ class Cache(object):
         self.cache_file = J(WORK_DIR, 'cache')
         if os.path.exists(self.cache_file):
             f = open(self.cache_file, 'rt')
-            self.data = pickle.load(f)
+            try:
+                self.data = pickle.load(f)
+            except:
+                logger.warning("error reading cache: %s" % traceback.format_exc())
+                self.data = {}
             f.close()
         else:
             self.data = {}
