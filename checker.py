@@ -22,7 +22,7 @@ WORK_DIR = J(os.environ['HOME'], '.mangop')
 ADMINS = (
     ('Andrey Rublev', 'version.ru@gmail.com'),
     ('Sergey Rublev', 'narma.nsk@gmail.com'),
-   # ('SeT', 'can15@narod.ru')
+    ('SeT', 'can15@narod.ru')
 )
 
 TIME_TO_WAKEUP = 90
