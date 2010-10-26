@@ -227,7 +227,12 @@ def already_running():
     if not os.path.exists(RUN_SOCKET_PATH):
         return False
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.connect(RUN_SOCKET_PATH)
+    try:
+        s.connect(RUN_SOCKET_PATH)
+    except:
+        s.close()
+        return False
+        
     s.send('alive?')
     data = s.recv(10)
     logger.debug('socket runner answered: %s' % data)
