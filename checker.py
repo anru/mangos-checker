@@ -46,7 +46,7 @@ SERVER_REALMD = 'realmd'
 def setup_logger():
 
     # Set up a specific logger with our desired output level
-    logger = logging.getLogger('MyLogger')
+    logger = logging.getLogger('checker_logger')
     logger.setLevel(logging.DEBUG)
     
     # Add the log message handler to the logger
@@ -57,8 +57,7 @@ def setup_logger():
     logger.addHandler(handler)
     return logger
 
-logger = setup_logger()
-
+logger = setup_logger() # todo: add locks to logger
 
 if not os.path.isfile(J(WORK_DIR, 'autorestart')):
     sys.exit(0)
@@ -121,6 +120,7 @@ class Cache(object):
     
     def set(self, name, value):
         self.data[name] = value
+        self.save()
     
     def get(self, name, default):
         return self.data.get(name, default)
