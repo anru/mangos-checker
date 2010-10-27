@@ -70,7 +70,7 @@ def setup_config():
 cfg = setup_config()
 ###### SETUP CONSTANTS #######
 
-TIME_TO_WAKEUP = cfg.get('checker', 'time_to_wakeup')
+TIME_TO_WAKEUP = cfg.getint('checker', 'time_to_wakeup')
 MANGOS_DIR = cfg.get('checker', 'mangos_dir')
 MANGOS_LOG_DIR = cfg.get('checker', 'mangos_log_dir')
 RUN_SOCKET_PATH = cfg.get('checker', 'run_socket_path')
