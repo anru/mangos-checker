@@ -14,29 +14,27 @@ import logging.handlers
 import cPickle as pickle
 from subprocess import PIPE, Popen
 from multiprocessing import Process
+from ConfigParser import ConfigParser, NoSectionError
 
 WORK_DIR = J(os.environ['HOME'], '.mangop')
 
-################## SOME CONFIGURATION CONSTANTS ###################
+################## default settings for checker.conf ##############
+# 
 
-ADMINS = (
-    ('Andrey Rublev', 'version.ru@gmail.com'),
-    ('Sergey Rublev', 'narma.nsk@gmail.com'),
-    ('SeT', 'can15@narod.ru')
-)
-
-TIME_TO_WAKEUP = 90
-CHECK_LIMIT = 25
-
-MANGOS_DIR = '/home/mangos/bin/used_rev/bin/'
-MANGOS_LOG_DIR = '/var/log/mangos/'
-
-RUN_SOCKET_PATH = J(WORK_DIR, 'run.sock')
+CFG_DEFAULTS = {
+    'time_to_wakeup': 90,
+    'mangos_dir': '/home/mangos/bin/used_rev/bin/',
+    'mangos_log_dir': '/var/log/mangos/',
+    'run_socket_path': J(WORK_DIR, 'run.sock')
+}
 
 ###################################################################
 
 if not os.path.exists(WORK_DIR):
     os.mkdir(WORK_DIR)
+    
+os.system("echo `date` > %s/last_start" % WORK_DIR)
+os.system("echo `whoami` > %s/last_user" % WORK_DIR)
     
 LOG_FILENAME = J(WORK_DIR, 'checker.log')
 
@@ -56,14 +54,48 @@ def setup_logger():
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     return logger
-
 logger = setup_logger() # todo: add locks to logger
 
-if not os.path.isfile(J(WORK_DIR, 'autorestart')):
+def setup_config():
+    cfg = ConfigParser(CFG_DEFAULTS)
+    conf_file = J(WORK_DIR, 'checker.conf')
+    cfg.read(conf_file)
+    if not cfg.has_section('checker'):
+        cfg.add_section('checker')
+    fp = open(conf_file, 'wt')
+    cfg.write(fp)
+    fp.close()
+    return cfg
+
+cfg = setup_config()
+###### SETUP CONSTANTS #######
+
+TIME_TO_WAKEUP = cfg.get('checker', 'time_to_wakeup')
+MANGOS_DIR = cfg.get('checker', 'mangos_dir')
+MANGOS_LOG_DIR = cfg.get('checker', 'mangos_log_dir')
+RUN_SOCKET_PATH = cfg.get('checker', 'run_socket_path')
+
+##############################
+
+autorestart_file = J(MANGOS_DIR, 'autorestart')
+if not os.path.isfile(autorestart_file):
+    logger.warn('%s special file not exists, exiting' % autorestart_file)
     sys.exit(0)
 
-os.system("echo `date` > %s/last_start" % WORK_DIR )
-os.system("echo `whoami` > %s/last_user" % WORK_DIR)
+
+def get_admins():
+    admins = []
+    try:
+        admin_list = cfg.options('admins')
+        for admin in admin_list:
+            entry = (admin, cfg.get('admins', admin))
+            admins.append(entry)
+    except NoSectionError:
+        pass
+    return admins
+
+ADMINS = get_admins()
+    
 
 def _popen(cmd, input=None, **kwargs):
     kw = dict(stdout=PIPE, stderr=PIPE, close_fds=os.name != 'nt', universal_newlines=True)
@@ -249,6 +281,7 @@ def already_running():
 @verbosethrows
 def check():
     if already_running():
+        logger.warning("Checker already running, exiting")
         sys.exit(0)
     psocket = Process(target=socket_runner, name='socket_runner')
     psocket.start()
