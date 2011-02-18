@@ -8,6 +8,8 @@ import sys
 from time import time, sleep
 import datetime
 
+from redis import Redis
+
 import logging
 import traceback
 import logging.handlers
@@ -25,7 +27,11 @@ CFG_DEFAULTS = {
     'time_to_wakeup': 90,
     'mangos_dir': '/home/mangos/bin/used_rev/bin/',
     'mangos_log_dir': '/var/log/mangos/',
-    'run_socket_path': J(WORK_DIR, 'run.sock')
+    'run_socket_path': J(WORK_DIR, 'run.sock'),
+    'mangosd_bin': 'mangosd',
+    'realmd_bin': 'realmd',
+    'redis_port': 6379,
+    'redis_host': 'localhost',
 }
 
 ###################################################################
@@ -62,6 +68,8 @@ def setup_config():
     cfg.read(conf_file)
     if not cfg.has_section('checker'):
         cfg.add_section('checker')
+    if not cfg.has_section('mangos'):
+        cfg.add_section('mangos')
     fp = open(conf_file, 'wt')
     cfg.write(fp)
     fp.close()
@@ -74,8 +82,15 @@ TIME_TO_WAKEUP = cfg.getint('checker', 'time_to_wakeup')
 MANGOS_DIR = cfg.get('checker', 'mangos_dir')
 MANGOS_LOG_DIR = cfg.get('checker', 'mangos_log_dir')
 RUN_SOCKET_PATH = cfg.get('checker', 'run_socket_path')
+REALMD_BIN = cfg.get('mangos', 'realmd_bin')
+MANGOSD_BIN = cfg.get('mangos', 'mangosd_bin')
+REDIS_HOST = cfg.get('checker', 'redis_host')
+REDIS_PORT = cfg.get('checker', 'redis_port')
 
 ##############################
+
+def connect_to_redis():
+    return Redis(host=REDIS_HOST, port=REDIS_PORT, db='mangos-checker')
 
 autorestart_file = J(MANGOS_DIR, 'autorestart')
 if not os.path.isfile(autorestart_file):
@@ -136,35 +151,6 @@ def check_server(name):
         return _check_server(port=3724)
     raise NotImplementedError
     
-class Cache(object):
-    def __init__(self):
-        self.cache_file = J(WORK_DIR, 'cache')
-        if os.path.exists(self.cache_file):
-            f = open(self.cache_file, 'rt')
-            try:
-                self.data = pickle.load(f)
-            except:
-                logger.warning("error reading cache: %s" % traceback.format_exc())
-                self.data = {}
-            f.close()
-        else:
-            self.data = {}
-            
-    def save(self):
-        f = open(self.cache_file, 'wt')
-        pickle.dump(self.data, f)
-        f.close()
-    
-    def set(self, name, value):
-        self.data[name] = value
-        self.save()
-    
-    def get(self, name, default):
-        return self.data.get(name, default)
-    
-    def __contains__(self, name):
-        return name in self.data
-
 def kill_server(name):
     filename = op.join(MANGOS_DIR, '%s.pid' % name) 
     delete_file = False
@@ -183,9 +169,9 @@ def kill_server(name):
 def start_server(name):
     try:
         if name == SERVER_REALMD:
-            process_name = J(MANGOS_DIR, 'mangos-realmd')
+            process_name = J(MANGOS_DIR, REALMD_BIN)
         elif name == SERVER_WORLDD:
-            process_name = J(MANGOS_DIR, 'mangos-worldd')
+            process_name = J(MANGOS_DIR, MANGOSD_BIN)
         count = int(os.popen("ps ax|grep %s | grep -v grep | wc -l" % process_name).read().strip())
         if count >= 1:
             logger.warn('Requested for start, but look for server already started. %s' % count)
@@ -223,28 +209,33 @@ def verbosethrows(func):
         
 @verbosethrows
 def do_check_service(server_name):
-    cache = Cache()
+    redis = connect_to_redis()
     server_status = check_server(server_name)
     if not server_status:
-        if (time() - cache.get('%s_lastkill' % server_name, 0)) > TIME_TO_WAKEUP:
-            down_check = cache.get('%s_down_check' % server_name, 0) + 1
+        lastkill = redis.get('%s_lastkill' % server_name) or 0
+        if (time() - lastkill) > TIME_TO_WAKEUP:
+            down_check = redis.get('%s_down_check' % server_name) or 0
+            down_check += 1
             if down_check > 10:
                 kill_server(server_name)
                 start_server(server_name)
-                cache.set('%s_lastkill' % server_name, time())
+                redis.set('%s_lastkill' % server_name, time())
+                redis.save()
                 logger.critical('Server %s restarted!' % server_name)
                 mail_admins("Server %s restarted!" % server_name)
                 sys.exit(0)
             else:
                 logger.warning('Server %s looks down, but downChecks=%d' % (server_name, down_check))
-                cache.set('%s_down_check' % server_name, down_check)
+                redis.set('%s_down_check' % server_name, down_check)
+                redis.save()
                 sleep(1)
                 do_check_service(server_name)
         else:
             logger.info('[%s] We need to wait %s seconds to start restarting count' % (server_name, TIME_TO_WAKEUP))
     else:
         logger.info('Server %s is OK' % server_name)
-        cache.set('%s_down_check' % server_name, 0)
+        redis.set('%s_down_check' % server_name, 0)
+        redis.save()
 
 @verbosethrows  
 def socket_runner():
