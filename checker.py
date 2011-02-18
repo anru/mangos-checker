@@ -85,7 +85,7 @@ RUN_SOCKET_PATH = cfg.get('checker', 'run_socket_path')
 REALMD_BIN = cfg.get('mangos', 'realmd_bin')
 MANGOSD_BIN = cfg.get('mangos', 'mangosd_bin')
 REDIS_HOST = cfg.get('checker', 'redis_host')
-REDIS_PORT = cfg.get('checker', 'redis_port')
+REDIS_PORT = cfg.getint('checker', 'redis_port')
 
 ##############################
 
