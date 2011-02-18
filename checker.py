@@ -213,8 +213,10 @@ def do_check_service(server_name):
     server_status = check_server(server_name)
     if not server_status:
         lastkill = redis.get('%s_lastkill' % server_name) or 0
+        lastkill = int(lastkill)
         if (time() - lastkill) > TIME_TO_WAKEUP:
             down_check = redis.get('%s_down_check' % server_name) or 0
+            down_check = int(down_check)
             down_check += 1
             if down_check > 10:
                 kill_server(server_name)
