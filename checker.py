@@ -183,7 +183,7 @@ def start_server(name):
 
     add_to_log = datetime.datetime.now().strftime('%d_%m_%Y__%H_%M')
     cmd = "%s > %s 2>&1 &" % (
-        op.join(MANGOS_DIR, 'mangos-%s' % name),
+        process_name,
         op.join(MANGOS_LOG_DIR, '%s_%s' % (name, add_to_log))
         )
     logger.debug('Starting %s cmd: %s' % (name, cmd))
