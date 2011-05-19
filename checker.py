@@ -127,22 +127,23 @@ def _popen(cmd, input=None, **kwargs):
     p = Popen(cmd, **kw)
     return p.communicate(input)
 
-def mail_message(rcpt, message, title='Mangop notification'):
+def mail_message(rcpts, message, title='Mangop notification'):
     msg = smtplib.email.message_from_string(message)
     msg.set_charset('utf-8')
     msg.add_header('Subject', title)
     msg.add_header('From', SMTP_FROM)
-    msg.add_header('To', rcpt)
     s = smtplib.SMTP(SMTP_HOST)
-    try:
-        s.sendmail(SMTP_FROM, [rcpt], msg.as_string())
-    except SMTPRecipientsRefused:
-        logger.error('email recipient %s does not exist' % rcpt )
+    for rcpt in rcpts:
+        msg.replace_header('To', rcpt) if msg.has_key('To') else msg.add_header('To', rcpt)
+        try:
+            s.sendmail(SMTP_FROM, [rcpt], msg.as_string())
+        except SMTPRecipientsRefused:
+            logger.error('email recipient %s does not exist' % rcpt )
     s.quit()
 
-def mail_admins(message, title='Mangop notification'):
-    for _, email in ADMINS:
-        mail_message(email, message)
+def mail_admins(message):
+    emails = map(lambda x: x[1], ADMINS)
+    mail_message(emails, message)
 
 def _check_server(host='127.0.0.1', port=8085):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
