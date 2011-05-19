@@ -10,6 +10,8 @@ import datetime
 
 from redis import Redis
 
+import smtplib
+from smtplib import SMTPSenderRefused
 import logging
 import traceback
 import logging.handlers
@@ -32,6 +34,8 @@ CFG_DEFAULTS = {
     'realmd_bin': 'realmd',
     'redis_port': 6379,
     'redis_host': 'localhost',
+    'smtp_host' : 'localhost',
+    'smtp_from' : 'no-reply@wowacadem.ru',
 }
 
 ###################################################################
@@ -86,6 +90,8 @@ REALMD_BIN = cfg.get('mangos', 'realmd_bin')
 MANGOSD_BIN = cfg.get('mangos', 'mangosd_bin')
 REDIS_HOST = cfg.get('checker', 'redis_host')
 REDIS_PORT = cfg.getint('checker', 'redis_port')
+SMTP_HOST  = cfg.get('checker', 'smtp_host')
+SMTP_FROM  = cfg.get('checker', 'smtp_from')
 
 ##############################
 
@@ -122,8 +128,17 @@ def _popen(cmd, input=None, **kwargs):
     return p.communicate(input)
 
 def mail_message(rcpt, message, title='Mangop notification'):
-    cmd = "mutt -s '%s' %s" % (title, rcpt)
-    _popen(cmd, message)
+    msg = smtplib.email.message_from_string(message)
+    msg.set_charset('utf-8')
+    msg.add_header('Subject', title)
+    msg.add_header('From', SMTP_FROM)
+    msg.add_header('To', rcpt)
+    s = smtplib.SMTP(SMTP_HOST)
+    try:
+        s.sendmail(SMTP_FROM, [rcpt], msg.as_string())
+    except SMTPRecipientsRefused:
+        logger.error('email recipient %s does not exist' % rcpt )
+    s.quit()
 
 def mail_admins(message, title='Mangop notification'):
     for _, email in ADMINS:
